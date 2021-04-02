@@ -1,0 +1,14 @@
+[package]
+name = "rick-roll"
+version = "0.1.0"
+authors = ["xethlyx <46338199+xethlyx@users.noreply.github.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+diesel = { version = "1.4.6", features = ["sqlite"] }
+rocket = "0.4.7"
+rocket_contrib = { version = "0.4.7", features = ["diesel_sqlite_pool"] }
+serde = { version = "1.0", features = ["derive"] }
+libsqlite3-sys = { version = "^0", features = ["bundled"] }
