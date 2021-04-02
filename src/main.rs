@@ -1,7 +1,7 @@
 #![feature(proc_macro_hygiene, decl_macro)]
 
-use std::path::PathBuf;
-use diesel::Connection;
+use std::{collections::hash_map::DefaultHasher, hash::{Hash, Hasher}, net::SocketAddr, path::PathBuf};
+use rand::{distributions::Alphanumeric, Rng};
 use rocket::{Rocket, fairing::AdHoc, response::Redirect};
 use rocket_contrib::json::Json;
 use serde::Serialize;
@@ -12,27 +12,38 @@ use serde::Serialize;
 // Database
 
 #[database("logging")]
-struct LoggingDatabaseConnection(diesel::SqliteConnection);
+struct LoggingDatabaseConnection(rusqlite::Connection);
 
 // JSON Responses
 
 #[derive(Serialize)]
 struct AdminStatistics {
-    hits: u32
+    hits: u32,
+    hits_unique: u32
 }
 
 // Main Code
 
-#[get("/admin/api/stats", format = "json")]
-fn statistics() -> Json<AdminStatistics> {
+#[get("/stats", format = "text/html")]
+fn statistics(data: LoggingDatabaseConnection) -> Json<AdminStatistics> {
+    let hits: u32 = data.0.query_row("SELECT COUNT(*) FROM hits", &[], |row| row.get(0)).unwrap();
+    let hits_unique: u32 = data.0.query_row("SELECT COUNT(DISTINCT ip_hash) FROM hits", &[], |row| row.get(0)).unwrap();
+
     Json(AdminStatistics {
-        hits: 0
+        hits,
+        hits_unique
     })
 }
 
-#[get("/<path..>")]
-fn rick_roll(path: PathBuf, data: LoggingDatabaseConnection) -> Redirect {
-    println!("Accessed {}", path.to_string_lossy());
+#[get("/<path..>", format = "text/html")]
+fn rick_roll(path: PathBuf, data: LoggingDatabaseConnection, ip: SocketAddr) -> Redirect {
+    let mut hasher = DefaultHasher::new();
+    ip.ip().to_string().hash(&mut hasher);
+
+    match data.0.execute("INSERT INTO hits (path, ip_hash) VALUES (?, ?)", &[&path.to_string_lossy(), &hasher.finish().to_string()]) {
+        Ok(_) => (),
+        Err(_) => println!("Error occurred while logging rick roll")
+    }
 
     Redirect::to("https://www.youtube.com/watch?v=xvFZjo5PgG0")
 }
@@ -44,7 +55,20 @@ fn create_structures(rocket: Rocket) -> Result<Rocket, Rocket> {
                 path TEXT, \
                 time DATETIME DEFAULT CURRENT_TIMESTAMP, \
                 ip_hash TEXT \
-            )").expect("Database creation failed");
+            )", &[]).expect("Database creation failed");
+
+            database.execute("CREATE TABLE IF NOT EXISTS meta ( \
+                key TEXT UNIQUE NOT NULL, \
+                value TEXT \
+            )", &[]).expect("Database creation failed");
+
+            let secret: String = rand::thread_rng()
+                .sample_iter(&Alphanumeric)
+                .take(16)
+                .map(char::from)
+                .collect();
+
+            let _ = database.execute("INSERT INTO meta (key, value) VALUES ('secret', ?)", &[&secret]);
 
             Ok(rocket)
         }
